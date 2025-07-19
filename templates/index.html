@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>QEMU Sessions</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 2em;
+            background: #f9f9f9;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            background: #fff;
+            padding: 1em;
+            margin-bottom: 1em;
+            border: 1px solid #ccc;
+        }
+
+        a {
+            text-decoration: none;
+            color: #007bff;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+<h2>Select QEMU VM</h2>
+<ul id="session-list">
+    <li>Loading...</li>
+</ul>
+
+<script>
+    async function loadSessions() {
+        const list = document.getElementById("session-list");
+        list.innerHTML = "<li>Loading...</li>";
+
+        try {
+            const res = await fetch("/api/sessions");
+            const sessions = await res.json();
+
+            if (!sessions.length) {
+                list.innerHTML = "<li>No QEMU sessions found.</li>";
+                return;
+            }
+
+            list.innerHTML = "";
+            sessions.forEach(s => {
+                const item = document.createElement("li");
+                item.innerHTML = `
+                    <div><b>PID:</b> ${s.pid}</div>
+                    <div><b>Socket:</b> ${s.qmp}</div>
+                    <div><a href="/session/${s.pid}">➤ Connect to PID ${s.pid}</a></div>
+                `;
+                list.appendChild(item);
+            });
+        } catch (e) {
+            list.innerHTML = "<li>Failed to load sessions.</li>";
+            console.error(e);
+        }
+    }
+
+    loadSessions();
+</script>
+</body>
+</html>

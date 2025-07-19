@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Needle Editor</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f0f0f0;
+            padding: 2em;
+        }
+
+        #canvas-container {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 1em;
+            border: 1px solid #ccc;
+        }
+
+        #canvas-container canvas {
+            display: block;
+        }
+
+        #bg-canvas, #overlay-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        input {
+            margin: 0.5em 0;
+        }
+
+        button {
+            margin-top: 1em;
+            padding: 0.5em 1em;
+        }
+
+        #areas-list {
+            margin-top: 2em;
+            background: #fff;
+            padding: 1em;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+<h1>Needle Editor</h1>
+
+<div id="canvas-container" style="position: relative; display: inline-block;">
+    <canvas id="bg-canvas" style="position: absolute; top: 0; left: 0; z-index: 0;"></canvas>
+    <canvas id="overlay-canvas" style="position: absolute; top: 0; left: 0; z-index: 1;"></canvas>
+</div>
+
+<div id="mouse-coords" style="margin-top: 0.5em; font-weight: bold;">Mouse: (x, y)</div>
+
+
+<div>
+    <button id="add-click-point">Add click point to selected area</button>
+    <button id="set-match">Set match level for selected area</button>
+</div>
+
+<button id="clear-all">Clear All</button>
+<div>
+    <h3>Needle Settings</h3>
+    Name: <input id="needle-name"><br>
+    Tags: <input id="needle-tags" placeholder="comma separated"><br>
+    <button id="save">Export Needle</button>
+</div>
+
+<div id="areas-list"></div>
+<div id="json-output" style="margin-top: 2em;">
+    <h3>Needle JSON Preview</h3>
+    <pre id="needle-json" style="background: #fff; border: 1px solid #ccc; padding: 1em; overflow-x: auto;"></pre>
+</div>
+
+
+<script>
+    // for picture
+    const bgCanvas = document.getElementById("bg-canvas");
+    // for drawing
+    const overlayCanvas = document.getElementById("overlay-canvas");
+
+    const bgCtx = bgCanvas.getContext("2d");
+    const overlayCtx = overlayCanvas.getContext("2d");
+
+    let areas = [], currentImage = null;
+    let isLoading = false;
+    let ws = null;
+    let pingInterval = null;
+    let imgTimeout = null;
+
+    // for click point dragging
+    let isDraggingClickPoint = false;
+    let dragOffsetX = 0, dragOffsetY = 0;
+
+    const pid = location.pathname.split("/").pop();
+
+    // index of current select rea
+    let selectedAreaIndex = -1;
+
+    function connectWebSocket() {
+        if (ws) {
+            try {
+                ws.send("__close__");
+            } catch (e) {
+                console.warn("Failed to notify close", e);
+            }
+            ws.close();
+            ws = null;
+        }
+
+        if (pingInterval) {
+            clearInterval(pingInterval);
+            pingInterval = null;
+        }
+
+        ws = new WebSocket(`ws://${location.host}/ws?pid=${encodeURIComponent(pid)}`);
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+            console.log("WS connected");
+            pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send("ping");
+                }
+            }, 4000);
+        };
+
+        ws.onmessage = (ev) => {
+            if (isLoading || isDrawing || areas.length > 0) return;
+            isLoading = true;
+
+            const buf = ev.data;
+            const blob = new Blob([buf], {type: "image/png"});
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+
+            imgTimeout = setTimeout(() => {
+                console.warn("🕒 Image load timeout");
+                isLoading = false;
+                URL.revokeObjectURL(url);
+            }, 3000);
+
+            img.onload = () => {
+                clearTimeout(imgTimeout);
+                currentImage = img;
+                const width = img.width;
+                const height = img.height;
+                bgCanvas.width = overlayCanvas.width = width;
+                bgCanvas.height = overlayCanvas.height = height;
+                const container = document.getElementById("canvas-container");
+                container.style.width = width + "px";
+                container.style.height = height + "px";
+                bgCtx.drawImage(img, 0, 0);
+                redraw();
+                URL.revokeObjectURL(url);
+                isLoading = false;
+            };
+
+            img.onerror = (e) => {
+                clearTimeout(imgTimeout);
+                console.error("PNG load failed", e);
+                URL.revokeObjectURL(url);
+                isLoading = false;
+            };
+
+            img.src = url;
+        };
+
+        ws.onerror = (e) => {
+            console.error("❌ WebSocket error", e);
+        };
+
+        ws.onclose = (e) => {
+            console.warn("❌ WS closed", e);
+        };
+    }
+
+    // close websocket when the page is refreshed or closed.
+    window.addEventListener("beforeunload", () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+                ws.send("__close__");
+            } catch (e) {
+            }
+            ws.close();
+        }
+    });
+
+    // Connect to websocket, after the page has fully loaded.
+    window.addEventListener("DOMContentLoaded", () => {
+        connectWebSocket();
+        // also render the needle-tags.
+        document.getElementById("needle-tags").addEventListener("input", renderJson);
+    });
+
+    // Reconnect the WebSocket when navigating back or forward in browser history.
+    window.refreshState = function () {
+        connectWebSocket();
+    };
+
+    // need a threshold to determine, whether tester is clicking a selected area, or drag and draw a new area.
+    let isDrawing = false, sx, sy;
+    overlayCanvas.addEventListener("mousedown", e => {
+        const r = overlayCanvas.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+
+        if (selectedAreaIndex >= 0) {
+            const a = areas[selectedAreaIndex];
+            if (a.click_point) {
+                const cx = a.xpos + a.click_point.xpos;
+                const cy = a.ypos + a.click_point.ypos;
+                const dist = Math.hypot(x - cx, y - cy);
+
+                if (dist <= 6) {
+                    isDraggingClickPoint = true;
+                    dragOffsetX = x - cx;
+                    dragOffsetY = y - cy;
+                    return;
+                }
+            }
+        }
+
+        // otherwise, record the start coordinates.
+        sx = x;
+        sy = y;
+        isDrawing = true;
+    });
+
+    overlayCanvas.addEventListener("mousemove", e => {
+        if (!isDraggingClickPoint || selectedAreaIndex < 0) return;
+
+        const r = overlayCanvas.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+
+        const a = areas[selectedAreaIndex];
+        let localX = x - dragOffsetX - a.xpos;
+        let localY = y - dragOffsetY - a.ypos;
+
+        // 限制在区域内
+        localX = Math.max(0, Math.min(a.width, localX));
+        localY = Math.max(0, Math.min(a.height, localY));
+
+        a.click_point = {
+            xpos: +localX.toFixed(1),
+            ypos: +localY.toFixed(1)
+        };
+
+        redraw();
+        renderJson();
+    });
+
+    // For displaying the cursor's x|y coordinates on canvas.
+    overlayCanvas.addEventListener("mousemove", e => {
+        const r = overlayCanvas.getBoundingClientRect();
+        const x = Math.floor(e.clientX - r.left);
+        const y = Math.floor(e.clientY - r.top);
+
+        const coordsDisplay = document.getElementById("mouse-coords");
+        coordsDisplay.textContent = `Mouse: (${x}, ${y})`;
+    });
+
+    // when the cursor leaves canvas, unset the corrdinates.
+    overlayCanvas.addEventListener("mouseleave", () => {
+        const coordsDisplay = document.getElementById("mouse-coords");
+        coordsDisplay.textContent = "Mouse: (–, –)";
+    });
+
+
+    overlayCanvas.addEventListener("mouseup", e => {
+        // this should be placed and checked before isDrawing. Otherwise the clickpoint will stick with the cursor.
+        if (isDraggingClickPoint) {
+            isDraggingClickPoint = false;
+            return;
+        }
+        if (!isDrawing) return;
+        isDrawing = false;
+
+        const r = overlayCanvas.getBoundingClientRect();
+        const ex = e.clientX - r.left, ey = e.clientY - r.top;
+
+        const dx = Math.abs(ex - sx);
+        const dy = Math.abs(ey - sy);
+
+        // if drag distance is small, treat as click, not drawing
+        if (dx < 3 && dy < 3) return;
+
+        // haven't tested if openqa allow decimal, but at here we just round them up.
+        const x = Math.floor(Math.min(sx, ex));
+        const y = Math.floor(Math.min(sy, ey));
+        const w = Math.floor(dx);
+        const h = Math.floor(dy);
+        const typ = "match";
+        areas.push({xpos: x, ypos: y, width: w, height: h, type: typ});
+        selectedAreaIndex = areas.length - 1;
+        redraw();
+        renderList();
+        renderJson();
+    });
+
+    // 鼠标点击选择区域
+    overlayCanvas.addEventListener("click", e => {
+        const r = overlayCanvas.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+
+        selectedAreaIndex = -1;
+        for (let i = areas.length - 1; i >= 0; i--) {
+            const a = areas[i];
+            if (
+                x >= a.xpos && x <= a.xpos + a.width &&
+                y >= a.ypos && y <= a.ypos + a.height
+            ) {
+                selectedAreaIndex = i;
+                break;
+            }
+        }
+
+        redraw();
+    });
+
+
+    // Delete selected area with Delete key
+    window.addEventListener("keydown", e => {
+        if (e.key === "Delete" && selectedAreaIndex >= 0) {
+            areas.splice(selectedAreaIndex, 1);
+            selectedAreaIndex = -1;
+            redraw();
+            renderList();
+            renderJson();
+        }
+    });
+
+    // click point
+    document.getElementById("add-click-point").addEventListener("click", () => {
+        if (selectedAreaIndex < 0) {
+            alert("Please select an area first");
+            return;
+        }
+
+        const area = areas[selectedAreaIndex];
+        area.click_point = {
+            xpos: Math.floor(area.width / 2),
+            ypos: Math.floor(area.height / 2)
+        };
+
+        redraw();
+        renderJson();
+    });
+
+    // match_level
+    document.getElementById("set-match").addEventListener("click", () => {
+        if (selectedAreaIndex < 0) {
+            alert("Please select an area first");
+            return;
+        }
+
+        const current = areas[selectedAreaIndex];
+        const input = prompt("Enter match level (0–100):", current.match ?? 40);
+        if (input === null) return; // Cancel
+
+        const level = parseInt(input);
+        if (isNaN(level) || level < 0 || level > 100) {
+            alert("Invalid match value. Must be a number between 0 and 100.");
+            return;
+        }
+
+        current.match = level;
+        renderJson();
+    });
+
+
+    function redraw() {
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+        overlayCtx.lineWidth = 2;
+        areas.forEach((a, i) => {
+            if (a.click_point) {
+                overlayCtx.fillStyle = "green";
+                overlayCtx.beginPath();
+                // make the click point larger so easier to drag.
+                overlayCtx.arc(a.xpos + a.click_point.xpos, a.ypos + a.click_point.ypos, 6, 0, 2 * Math.PI);
+                overlayCtx.fill();
+            }
+            overlayCtx.strokeStyle = i === selectedAreaIndex ? "blue" : "red";
+            overlayCtx.strokeRect(a.xpos, a.ypos, a.width, a.height);
+        });
+    }
+
+    function renderList() {
+        const box = document.getElementById("areas-list");
+        box.innerHTML = "<h3>Defined Areas</h3>";
+        areas.forEach((a, i) =>
+            box.innerHTML += `<p>${i + 1}: ${a.type}@(${a.xpos},${a.ypos},${a.width},${a.height})</p>`);
+    }
+
+    function renderJson() {
+        const tags = document.getElementById("needle-tags").value.split(",").map(t => t.trim()).filter(Boolean);
+        const output = {
+            area: areas.map(a => {
+                const base = {
+                    xpos: a.xpos,
+                    ypos: a.ypos,
+                    width: a.width,
+                    height: a.height,
+                    type: a.type,
+                    match: a.match ?? 20
+                };
+                if (a.click_point) {
+                    base.click_point = {
+                        xpos: +a.click_point.xpos.toFixed(1),
+                        ypos: +a.click_point.ypos.toFixed(1)
+                    };
+                }
+                return base;
+            }),
+            properties: [],
+            tags: tags
+        };
+
+        const pre = document.getElementById("needle-json");
+        pre.textContent = JSON.stringify(output, null, 2);
+    }
+
+    document.getElementById("clear-all").addEventListener("click", () => {
+        if (!confirm("Are you sure you want to clear all areas?")) return;
+
+        areas = [];
+        selectedAreaIndex = -1;
+        isLoading = false;
+
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+        renderList();
+        renderJson();
+    });
+
+
+    // save needle, with debug. should remove try catch later.. maybe...
+    document.getElementById("save").addEventListener("click", async () => {
+        const name = document.getElementById("needle-name").value.trim();
+        if (!name) return alert("need name");
+
+        const tags = document.getElementById("needle-tags").value.split(",").map(t => t.trim()).filter(Boolean);
+
+        const imageBlob = await new Promise(resolve => {
+            bgCanvas.toBlob(blob => resolve(blob), "image/png");
+        });
+
+        // Validate blob
+        if (!imageBlob) {
+            console.error("canvas.toBlob returned null");
+            alert("Failed to capture screenshot. Is canvas empty?");
+            return;
+        }
+
+        console.log("Captured imageBlob:", imageBlob);
+
+        const payload = {
+            name,
+            tags,
+            areas
+        };
+
+        const formData = new FormData();
+        formData.append("meta", new Blob([JSON.stringify(payload)], {type: "application/json"}));
+        formData.append("image", imageBlob, `${name}.png`);
+
+        try {
+            console.log("sending to /save...");
+            const res = await fetch("/save", {
+                method: "POST",
+                body: formData
+            });
+            console.log("got response from /save");
+            const data = await res.json();
+            alert("saved: " + data.saved);
+        } catch (err) {
+            console.error("Upload failed", err);
+            alert("Upload failed");
+        }
+    });
+
+
+</script>
+
+</body>
+</html>

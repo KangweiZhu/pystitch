@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Download magick from its official site, since KDE Linux does not built with magick
+curl -L https://imagemagick.org/archive/binaries/magick -o magick
+chmod +x magick
+
+rm -rf venv
+python -m venv venv
+source venv/bin/activate
+pip install -r requirement.txt
+python needle_editor.py
