@@ -10,6 +10,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(BASE, "static")
 NEEDLES = os.path.join(BASE, "needles")
 os.makedirs(NEEDLES, exist_ok=True)
+os.makedirs(STATIC, exist_ok=True)
 
 
 def get_qemu_sessions():
