@@ -4,3 +4,5 @@ flask
 flask-socketio
 eventlet
 flask-sock
+requests
+beautifulsoup4

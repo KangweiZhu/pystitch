@@ -1,0 +1,4 @@
+#!/bin/bash
+
+# Only run this script if you want to install pystitch dependencies locally.
+pacman -S python-opencv python-numpy python-flask imagemagick python-flask-socketio python-eventlet python-flask-sock

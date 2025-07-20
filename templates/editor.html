@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Needle Editor</title>
+    <title>Pystitch</title>
     <style>
         body {
             font-family: sans-serif;
@@ -45,7 +45,7 @@
     </style>
 </head>
 <body>
-<h1>Needle Editor</h1>
+<h1>Pystitch</h1>
 
 <div id="canvas-container" style="position: relative; display: inline-block;">
     <canvas id="bg-canvas" style="position: absolute; top: 0; left: 0; z-index: 0;"></canvas>
@@ -240,7 +240,7 @@
         let localX = x - dragOffsetX - a.xpos;
         let localY = y - dragOffsetY - a.ypos;
 
-        // 限制在区域内
+        // limit inside the region
         localX = Math.max(0, Math.min(a.width, localX));
         localY = Math.max(0, Math.min(a.height, localY));
 
@@ -301,7 +301,7 @@
         renderJson();
     });
 
-    // 鼠标点击选择区域
+    // mouse click to start selecting area
     overlayCanvas.addEventListener("click", e => {
         const r = overlayCanvas.getBoundingClientRect();
         const x = e.clientX - r.left;

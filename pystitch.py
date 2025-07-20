@@ -125,7 +125,7 @@ def screenshot_socket(ws):
             time.sleep(1)
 
         # Cleanup temp files, will be triggered when the qemu session is closed. So remember terminating qemu before terminating this server.
-        # Otherwise the bmp & png files will stack inside needle_editor/static directory.
+        # Otherwise the bmp & png files will stack inside pystitch/static directory.
         for p in (bmp, png):
             try:
                 os.remove(p)

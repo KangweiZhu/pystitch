@@ -1,0 +1,41 @@
+#!/bin/bash
+
+WORK_DIR=$PWD
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 [--latest | --build=VERSION]"
+    exit 1
+fi
+
+rm -rf venv
+python -m venv venv
+source venv/bin/activate
+pip install -r requirement.txt
+
+$WORK_DIR/utils/pystitch_bootstrap
+echo "View Pystitch WebUI at http://localhost:8080"
+
+echo "Removing existing .{raw, qcow2, log} files"
+rm -f *.raw 2>/dev/null
+rm -f *.qcow2 2>/dev/null
+rm -r *.log 2>/dev/null
+
+source venv/bin/activate
+python utils/download_image "$1"
+
+qemu-img create -f qcow2 full_system_testbed.qcow2 50G
+qemu-system-x86_64 \
+    -enable-kvm \
+    -m 4G \
+    -cpu host \
+    -drive file=$(ls -1 $WORK_DIR/*.raw | head -n1),format=raw,if=ide,index=0 \
+    -drive file=$WORK_DIR/full_system_testbed.qcow2,format=qcow2,if=virtio \
+    -bios /usr/share/OVMF/x64/OVMF.4m.fd \
+    -device VGA,edid=on,xres=1024,yres=768 \
+    -serial stdio \
+    -vnc :1 \
+    -display sdl \
+    -qmp unix:/tmp/qmp-kde.sock,server,nowait
+
+
+
