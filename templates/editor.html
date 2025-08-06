@@ -322,6 +322,29 @@
         redraw();
     });
 
+    // double click to toggle exclude
+    overlayCanvas.addEventListener("dblclick", e => {
+        const r = overlayCanvas.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        const y = e.clientY - r.top;
+
+        for (let i = areas.length - 1; i >= 0; i--) {
+            const a = areas[i];
+            if (
+                x >= a.xpos && x <= a.xpos + a.width &&
+                y >= a.ypos && y <= a.ypos + a.height
+            ) {
+                // toggle between match and exclude
+                a.type = (a.type === "exclude") ? "match" : "exclude";
+                selectedAreaIndex = i; // keep it selected
+                redraw();
+                renderList();
+                renderJson();
+                break;
+            }
+        }
+    });
+
 
     // Delete selected area with Delete key
     window.addEventListener("keydown", e => {
@@ -384,8 +407,19 @@
                 overlayCtx.arc(a.xpos + a.click_point.xpos, a.ypos + a.click_point.ypos, 6, 0, 2 * Math.PI);
                 overlayCtx.fill();
             }
-            overlayCtx.strokeStyle = i === selectedAreaIndex ? "blue" : "red";
+            // draw frame based on type
+            if (a.type === "exclude") {
+                overlayCtx.strokeStyle = "red";
+            } else {
+                overlayCtx.strokeStyle = "green";
+            }
             overlayCtx.strokeRect(a.xpos, a.ypos, a.width, a.height);
+
+            // if selected, add blue overlay frame
+            if (i === selectedAreaIndex) {
+                overlayCtx.strokeStyle = "blue";
+                overlayCtx.strokeRect(a.xpos - 1, a.ypos - 1, a.width + 2, a.height + 2);
+            }
         });
     }
 

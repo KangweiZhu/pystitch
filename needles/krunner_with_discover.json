@@ -1,0 +1,16 @@
+{
+  "area": [
+    {
+      "xpos": 229,
+      "ypos": -1,
+      "width": 562,
+      "height": 75,
+      "type": "match",
+      "match": 90
+    }
+  ],
+  "properties": [],
+  "tags": [
+    "krunner_with_discover"
+  ]
+}
