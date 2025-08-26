@@ -1,0 +1,16 @@
+[project]
+name = "pystitch"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "beautifulsoup4>=4.13.5",
+    "eventlet>=0.40.2",
+    "flask>=3.1.2",
+    "flask-sock>=0.7.0",
+    "flask-socketio>=5.5.1",
+    "numpy>=2.2.6",
+    "opencv-python>=4.11.0.86",
+    "requests>=2.32.5",
+]

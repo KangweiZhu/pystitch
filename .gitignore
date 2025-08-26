@@ -3,3 +3,5 @@ venv
 *.qcow2
 *.raw
 *.log
+.venv
+
